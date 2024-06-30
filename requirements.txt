@@ -1,0 +1,8 @@
+OpenEXR
+numpy
+wandb
+matplotlib
+tqdm
+pandas
+jupyter
+dropbox
