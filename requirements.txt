@@ -5,4 +5,4 @@ matplotlib
 tqdm
 pandas
 jupyter
-dropbox
+scikit-learn

@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import yaml
 
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -57,12 +58,15 @@ def readEXR(filename, convert_to_sRGB=False):
     channelData = {}
 
     # convert all channels in the image to numpy arrays
+
     for c in header['channels']:
         C = exrfile.channel(c, Imath.PixelType(Imath.PixelType.FLOAT))
         C = np.fromstring(C, dtype=np.float32)
         C = np.reshape(C, isize)
 
         channelData[c] = C
+
+
 
     colorChannels = ['R', 'G', 'B', 'A'] if 'A' in header['channels'] else ['R', 'G', 'B']
     img = np.concatenate([channelData[c][..., np.newaxis] for c in colorChannels], axis=2)
@@ -76,26 +80,10 @@ def readEXR(filename, convert_to_sRGB=False):
     # sanitize image to be in range [0, 1]
     img = np.where(img < 0.0, 0.0, np.where(img > 1.0, 1, img))
 
-    # I dont need Z, discarded
-    # Z = None if 'Z' not in header['channels'] else channelData['Z']
 
     return img
 
 
-"""Okay, Ima try this again. I will Recalculate the gram matrices, this time useing torch instead of tf
-I believe I made some crucial mistakes last time
-
-Todo:
-
-
-*   Adapt code, its for style transfer now, dont need a lot of whats going on
-**  Remove content layer stuff
-**  check if module/layer variables can be read after something got pushed through the network
-*   After gram generation, check value space, if nescessary normalize (I think it might not be nescessary this time)
-*
-
-
-"""
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -143,17 +131,6 @@ def gram_matrix(input):
         c * d)
 
 
-# class StyleLoss(nn.Module):
-
-#     def __init__(self, target_feature):
-#         super(StyleLoss, self).__init__()
-#         self.target = gram_matrix(target_feature).detach()
-
-#     def forward(self, input):
-#         self.gram = gram_matrix(input)
-#         self.loss = F.mse_loss(G, self.target)
-#         return input
-
 class StyleExtract(nn.Module):
 
     def __init__(self):
@@ -174,11 +151,6 @@ class StyleExtract(nn.Module):
         return input
 
 
-
-
-
-# create a module to normalize input image so we can easily put it in a
-# nn.Sequential
 class Normalization(nn.Module):
     def __init__(self, mean, std):
         super(Normalization, self).__init__()
@@ -192,15 +164,6 @@ class Normalization(nn.Module):
         # normalize img
         return (img - self.mean) / self.std
 
-
-# @title Building the model that with layers that produce gram matrices.
-# @markdown Iterates over the prebuilt vgg network, makes changes if nescessary (change "layer" to whatever we want to insert in iteration (see Relu)) <br>(**TODO: change max pooling to avg pooling?**). <br>
-# @markdown if the layer was one of the style layers we enter our custom style layer in between. that layer does not actually do anything to the data in the network, but gives us a way to extract the style matrix after the image ran though the network
-# @markdown Returnes the model and an array to access style matrices.
-# desired depth layers to compute style/content losses :
-
-
-# content_layers_default = ['conv_4']
 
 
 def get_style_model_and_style_extract_layers(cnn, normalization_mean, normalization_std,
@@ -251,14 +214,66 @@ def get_style_model_and_style_extract_layers(cnn, normalization_mean, normalizat
             if name == style_layers[-1]:
                 break
 
-    # now we trim off the layers after the last content and style losses
-    # for i in range(len(model) - 1, -1, -1):
-    #     if isinstance(model[i], StyleExtract):
-    #         break
-
-    # model = model[:(i + 1)]
 
     return model, style_grams  # , content_losses
+
+
+
+def calculate_layer_grams_and_save(load_directory, save_directory, model, styles, metadata, metadataPath):
+
+
+    all_files = os.listdir(load_directory)
+    all_exr_files = set([file for file in all_files if file.endswith(".exr")])
+    not_processed_files = all_exr_files - metadata['processed_files']
+
+    processed = 0
+
+    failed = []
+    print(f"Generating Grams - {len(not_processed_files)} files to process")
+    for filename in tqdm(not_processed_files):
+
+        if not filename.endswith(".exr") or filename in metadata['processed_files']:
+            continue
+
+        loadPath = os.path.join(load_directory, filename)
+
+        try:
+            im = image_loader(loadPath)
+        except Exception as e:
+            # this is a bit scetchy, but probably it failed cause the image is faulty
+            print(f"Error reading {loadPath}")
+            print(f"Error reading {loadPath}: {e}")
+
+            # move file into broken folder
+            brokenPath = os.path.join(os.path.dirname(loadPath), 'broken')
+            os.makedirs(brokenPath, exist_ok=True)
+            os.rename(loadPath, os.path.join(brokenPath, filename))
+            failed.append(filename)
+            continue
+
+
+        with torch.no_grad():
+            model(im)
+
+        for i, style in enumerate(styles):
+            # Update overall min and max
+            metadata['mins'][i] = min(metadata['mins'][i], style.min)
+            metadata['maxs'][i] = max(metadata['maxs'][i], style.max)
+
+            savePath = os.path.join(save_directory, 'not_normalised', filename.split(".")[0] + f"_{i}")
+
+            matrix = style.gram.cpu()
+            torch.save(matrix, savePath)
+
+        metadata['processed_files'].add(filename)
+        if processed % 100 == 0:
+            print(f"Saving Metadata - {len(metadata['processed_files'])} / {len(all_exr_files)} processed")
+            with open(metadataPath, 'w') as file:
+                yaml.dump(metadata, file)
+        processed += 1
+
+    print(f"Failed to process {len(failed)} files")
+
 
 
 if __name__ == '__main__':
@@ -270,154 +285,19 @@ if __name__ == '__main__':
 
     model, styles = get_style_model_and_style_extract_layers(cnn, cnn_normalization_mean, cnn_normalization_std)
 
-    loadDirectory = r'/app/data/renders'
+    loadDirectory = r'/app/data/Frames'
     saveDirectory = r'/app/data/grams'
 
-    grams = {}
+    # check if save directory has a metadata yaml file
+    metadataPath = os.path.join(saveDirectory, 'not_normalised_metadata.yaml')
+    if os.path.exists(metadataPath):
+        with open(metadataPath, 'r') as file:
+            metadata = yaml.load(file, Loader=yaml.FullLoader)
+    else:
+        metadata = {'mins': [float('inf')] * 5, 'maxs': [float('-inf')] * 5, 'processed_files': set()}
 
-    mins = [float('inf')] * 5
-    maxs = [float('-inf')] * 5
-    hist = [] * 5
+    calculate_layer_grams_and_save(loadDirectory, saveDirectory, model, styles, metadata, metadataPath)
 
-    model, styles = get_style_model_and_style_extract_layers(cnn, cnn_normalization_mean, cnn_normalization_std)
+    with open(metadataPath, 'w') as file:
+        yaml.dump(metadata, file)
 
-    count = 0
-
-    print("Generating Grams")
-    for filename in tqdm(os.listdir(loadDirectory)):
-
-        if not filename.endswith(".exr"):
-            continue
-
-        loadPath = os.path.join(loadDirectory, filename)
-        savePath = os.path.join(saveDirectory, filename + "_ConcatGram")
-
-        if os.path.exists(savePath):
-            continue
-
-        im = image_loader(loadPath)
-
-        with torch.no_grad():
-            model(im)
-
-        for i, style in enumerate(styles):
-            # Update overall min and max
-            mins[i] = min(mins[i], style.min)
-            maxs[i] = max(maxs[i], style.max)
-
-            # Update histogram
-            # hist[i] += style.hist
-
-    print(f'maxs: {maxs}')
-    print(f'mins: {mins}')
-
-    """[tensor(637.8943), tensor(554.4865), tensor(405.1444), tensor(45.7615), tensor(4.8098)]
-    
-    [tensor(-617.9616), tensor(-253.7502), tensor(-148.7658), tensor(-23.1019), tensor(-2.9467)]
-    """
-
-    print("normalising and saving Grams")
-
-    # maxs = torch.tensor([637.8943, 554.4865, 405.1444, 45.7615, 4.8098])
-    # mins = torch.tensor([-617.9616, -253.7502, -148.7658, -23.1019, -2.9467])
-
-    i = 0
-    for filename in tqdm(os.listdir(loadDirectory)):
-
-
-
-        concatMat = torch.empty(0)
-
-        if not filename.endswith(".exr"):
-            continue
-
-        loadPath = os.path.join(loadDirectory, filename)
-        # savePath = os.path.join(saveDirectory, i)
-        if not os.path.exists(saveDirectory):
-            os.makedirs(saveDirectory)
-        savePath = os.path.join(saveDirectory, filename.split(".")[0] + "ConcatGram")
-
-        if os.path.exists(savePath):
-            continue
-
-        im = image_loader(loadPath)
-
-        with torch.no_grad():
-            model(im)
-
-        for i, style in enumerate(styles):
-            matrix = style.gram.cpu()
-            matrix = matrix.subtract(mins[i])
-            matrix = matrix.div(maxs[i] - mins[i])
-
-            if torch.max(matrix) > 1 or torch.min(matrix) < 0:
-                print("ALAAARRMM")
-
-            concatMat = torch.cat([concatMat, torch.flatten(matrix)], dim=0)
-
-        torch.save(concatMat, savePath)
-
-
-    print(concatMat.shape)
-
-# """# Testing shenanigans"""
-#
-# from operator import itemgetter
-#
-# maxItem = [0] * 5
-# minMaxItem = [999999999] * 5
-# minItem = [10000000000] * 5
-# maxMinItem = [-999999] * 5
-# # allGrams[3]["gram1"]
-#
-# for grams in tqdm(allGrams):
-#
-#     for i in range(5):
-#         maxItem[i] = max(maxItem[i], grams['gram' + str(i) + " max"])
-#         minMaxItem[i] = min(minMaxItem[i], grams['gram' + str(i) + " max"])
-#         minItem[i] = min(minItem[i], grams['gram' + str(i) + " min"])
-#         maxMinItem[i] = max(maxMinItem[i], grams['gram' + str(i) + " min"])
-#
-# print(maxItem)
-# print(minMaxItem)
-# print(minItem)
-# print(maxMinItem)
-#
-# test = []
-#
-# test.append(4)
-# print(test)
-#
-# im = image_loader('/content/image.exr')
-# model(im)
-#
-# for style in styles:
-#     print("min = {}, max = {}, diff= {}".format(torch.min(style.gram), torch.max(style.gram),
-#                                                 torch.min(style.gram) - torch.max(style.gram)))
-#     imshow(style.gram)
-#
-# for style in styles:
-#     show = style.gram.add(-torch.min(style.gram))
-#     show = show.div(torch.max(show))
-#     print("min = {}, max = {}, diff= {}".format(torch.min(show), torch.max(show), torch.min(show) - torch.max(show)))
-#     imshow(show)
-#     plt.figure()
-#     hist = [0] * 100
-#     thisHist = np.histogram(show.detach(), bins=10, range=[0, 1])
-#     print(thisHist[0])
-#     plt.bar(thisHist[1][:10], thisHist[0][:10])
-#
-# hist = [0] * 100
-# thisHist = np.histogram(data, bins=100, range=[-10, 20])
-# plt.bar(thisHist[1][:100], hist[:100])
-#
-# show.save()
-#
-# # #path = os.path.join(directory,filename)
-# path = '/content/image.exr'
-#
-# image = image_loader(path)
-#
-# imshow(image)
-#
-# img.shape
