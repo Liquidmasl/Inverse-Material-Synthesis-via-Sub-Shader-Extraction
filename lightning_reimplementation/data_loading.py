@@ -9,7 +9,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
-from src.util import get_file_with_highest_number
+from lightning_reimplementation.util import get_file_with_highest_number
 
 class BlenderSuperShaderRendersDataset(Dataset):
     def __init__(self, param_dir, gram_directory, training_run_path, transform=None, add_key_colors_to_input=False,

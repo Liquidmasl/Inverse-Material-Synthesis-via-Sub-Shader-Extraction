@@ -12,7 +12,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 
-from src.data_loading import BlenderShaderDataModule
+from lightning_reimplementation.data_loading import BlenderShaderDataModule
 
 torch.set_float32_matmul_precision('medium')
 
