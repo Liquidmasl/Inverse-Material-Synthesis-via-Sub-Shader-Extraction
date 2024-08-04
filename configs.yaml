@@ -1,0 +1,13 @@
+param_dir: '/app/data/Frames'
+gram_directory: '/app/data/grams/normalised'
+importance_path: '/app/data/feature_importance'
+index_path: '/app/data/index.csv'
+
+batch_size: 10
+input_size: 2500
+output_size: 41
+
+initial_lr: 0.0001
+max_epochs: 10000
+
+splits: [10, 10, 10]

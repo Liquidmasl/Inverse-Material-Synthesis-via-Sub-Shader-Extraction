@@ -1,6 +1,7 @@
 OpenEXR
 numpy
 wandb
+pytorch-lightning
 matplotlib
 tqdm
 pandas
