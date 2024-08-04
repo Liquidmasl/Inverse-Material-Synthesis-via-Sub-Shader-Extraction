@@ -37,6 +37,10 @@ class BlenderSuperShaderRendersDataset(Dataset):
 
         if input_size > 0:
             self.init_importances(input_size, force_additional_importance_calc, importance_path)
+        else:
+            grams, targets = self[0]
+            self.importances = np.ones(len(grams))
+
 
     def init_importances(self, take_top_n_features, force_more_importance_calc, importance_path):
         self.feature_mask = None
@@ -50,6 +54,7 @@ class BlenderSuperShaderRendersDataset(Dataset):
 
         top_indices = sorted_indices[:take_top_n_features]
 
+        self.importances = feature_importance[top_indices]
         self.feature_mask = top_indices.copy()
 
     def init_dataframe(self):
@@ -174,7 +179,7 @@ class BlenderShaderDataModule(LightningDataModule):
         self.dataset = BlenderSuperShaderRendersDataset(training_run_path = self.training_run_path, **self.configs)
 
         if 'splits_calc' in self.configs:
-            self.splits = self.metadata['splits_calc']
+            self.splits = self.configs['splits_calc']
         else:
             np_splits = np.array(self.configs['splits'])
             if (np_splits > 1).all() and np.issubdtype(np_splits.dtype, np.integer):
