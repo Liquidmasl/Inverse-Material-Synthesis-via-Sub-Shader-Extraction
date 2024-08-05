@@ -24,6 +24,7 @@ class MyModel(pl.LightningModule):
         self.loss_fns = loss_fns
         self.loss_fn_name = loss_fn_name
         self.optimiser_setup = optimiser_setup
+        self.num_classes = num_classes
 
         self.layers = nn.ModuleList([
             nn.Linear(input_size, 2000),
@@ -95,6 +96,8 @@ class MyModel(pl.LightningModule):
 
     def on_validation_epoch_start(self):
         super().on_validation_epoch_start()
+        lr = self.trainer.optimizers[0].param_groups[0]['lr']
+        self.log('learning_rate', lr, on_epoch=True)
         self.validation_abs_errors = []
 
     def on_epoch_end(self):
@@ -104,7 +107,7 @@ class MyModel(pl.LightningModule):
 
     def configure_optimizers(self):
         if self.optimiser_setup['optimiser'] == 'adam':
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.optimiser_setup['lr'])
         else:
             raise ValueError("Only adam is supported as of now")
 
@@ -206,7 +209,6 @@ def start_training_run():
     )
     data_module.setup(stage='fit')
 
-    weights = data_module.dataset.importances
 
     loss_functions = {
         'mse': F.mse_loss,
@@ -214,7 +216,7 @@ def start_training_run():
         # 'wmse': Weighted_MSELoss(weights, configs.get('wmse_imterpolation_map'))
     }
 
-    model = MyModel(input_size=configs['input_size'], num_classes=41, lr=configs['initial_lr'], loss_fn_name=configs['loss_fn'], loss_fns=loss_functions, optimiser_setup=configs['optimiser_setup'])
+    model = MyModel(input_size=configs['input_size'], num_classes=41, loss_fn_name=configs['loss_fn'], loss_fns=loss_functions, optimiser_setup=configs['optimiser_setup'])
     wandb_logger.experiment.watch(model, 'all')
 
 

@@ -1,13 +1,13 @@
 param_dir: '/app/data/Frames'
 gram_directory: '/app/data/grams/normalised'
 importance_path: '/app/data/feature_importance'
+prefiltered_gram_path: '/app/data/grams/prefiltered_concat'
 index_path: '/app/data/index.csv'
 
-batch_size: 256
+batch_size: 64
 input_size: 2500
 output_size: 41
 
-initial_lr: 0.0001
 max_epochs: 10000
 
 splits: [10000, 100, 100]
@@ -23,7 +23,7 @@ optimiser_setup:
     use_scheduler: True
     scheduler: 'stepLR'
 
-    step_size: 100
+    step_size: 1000
     gamma: 0.1
 
     interval: 'epoch'

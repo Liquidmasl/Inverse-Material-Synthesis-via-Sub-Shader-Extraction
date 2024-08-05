@@ -13,7 +13,7 @@ from lightning_reimplementation.util import get_file_with_highest_number
 
 class BlenderSuperShaderRendersDataset(Dataset):
     def __init__(self, param_dir, gram_directory, training_run_path, transform=None, add_key_colors_to_input=False,
-                  input_size=-1, force_additional_importance_calc=False, importance_path=None, index_path=None, **kwargs):
+                  input_size=-1, force_additional_importance_calc=False, importance_path=None, index_path=None, prefiltered_gram_path=None, **kwargs):
         self.param_dir = param_dir
         self.gram_directory = gram_directory
         self.transform = transform
@@ -22,6 +22,10 @@ class BlenderSuperShaderRendersDataset(Dataset):
         self.dataset = None
         self.feature_mask = None
         self.training_run_path = training_run_path
+        self.prefiltered_gram_path = os.path.join(prefiltered_gram_path, f"top_{input_size}")
+        os.makedirs(self.prefiltered_gram_path, exist_ok=True)
+
+        self.cache = {}
 
         self.num_params = 41
 
@@ -31,6 +35,9 @@ class BlenderSuperShaderRendersDataset(Dataset):
             self.init_dataframe()
 
         self.dataset.to_csv(os.path.join(self.training_run_path, 'index.csv'), index=False)
+
+        # if prefiltered_gram_path is not None:
+        #     return
 
         self.local_importances_path = os.path.join(self.training_run_path, 'feature_importances')
         os.makedirs(self.local_importances_path, exist_ok=True)
@@ -145,22 +152,38 @@ class BlenderSuperShaderRendersDataset(Dataset):
 
     def __getitem__(self, index):
 
-        dataset_row = self.dataset.iloc[index]
-        input_grams = [torch.load(gram_filename) for gram_filename in dataset_row['gram_paths']]
-        input_gram_diags = [gram[np.triu_indices(gram.shape[0], k=1)] for gram in input_grams]
-        input_grams_concat = torch.cat(input_gram_diags)
+        if index in self.cache:
+            return self.cache[index]
 
-        params = dataset_row['parameters'].values.astype(np.float32)
+        try:
+            input_grams_concat = torch.load(os.path.join(self.prefiltered_gram_path, f"{index}.pt"))
+            params = self.dataset.iloc[index]['parameters'].values.astype(np.float32)
+        except FileNotFoundError:
+            dataset_row = self.dataset.iloc[index]
+            input_grams = [torch.load(gram_filename) for gram_filename in dataset_row['gram_paths']]
+            input_gram_diags = [gram[np.triu_indices(gram.shape[0], k=1)] for gram in input_grams]
+            input_grams_concat = torch.cat(input_gram_diags)
+
+            if self.feature_mask is not None:
+                input_grams_concat = input_grams_concat[self.feature_mask]
+
+            torch.save(input_grams_concat, os.path.join(self.prefiltered_gram_path, f"{index}.pt"))
+            print(f"Saved prefiltered gram {index}")
+
+            params = dataset_row['parameters'].values.astype(np.float32)
+
+
 
         if self.add_key_colors_to_input:
             params = np.concatenate((params, dataset_row['key_colors'].values))
 
-        if self.feature_mask is not None:
-            input_grams_concat = input_grams_concat[self.feature_mask]
-
         params = torch.tensor(params)
 
+        self.cache[index] = (input_grams_concat, params)
+
         return (input_grams_concat, params)
+
+
 
 
 class BlenderShaderDataModule(LightningDataModule):
@@ -171,12 +194,20 @@ class BlenderShaderDataModule(LightningDataModule):
         self.training_run_path = training_run_path
         self.configs = configs
 
+        self.cache_built = False
+
 
 
     def setup(self, stage=None):
         # Load or initialize the dataset here
 
-        self.dataset = BlenderSuperShaderRendersDataset(training_run_path = self.training_run_path, **self.configs)
+        self.dataset = BlenderSuperShaderRendersDataset(training_run_path=self.training_run_path, **self.configs)
+
+        #   this is hacky and slow, but it forces to dataset to prefilter all the data:
+        if not self.cache_built:
+            for a, b in tqdm(self.dataset, desc="Prefiltering dataset"):
+                pass
+            self.cache_built = True
 
         if 'splits_calc' in self.configs:
             self.splits = self.configs['splits_calc']
@@ -226,15 +257,15 @@ class BlenderShaderDataModule(LightningDataModule):
 
     def train_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['train_start'], self.configs['splits_calc']['train_end']))
-        return DataLoader(subs, batch_size=self.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+        return DataLoader(subs, batch_size=self.batch_size, shuffle=True, num_workers=16, pin_memory=True)
 
     def val_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['val_start'], self.configs['splits_calc']['val_end']))
-        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     def test_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['test_start'], self.configs['splits_calc']['test_end']))
-        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     def teardown(self, stage=None):
         # Clean up after training or testing
