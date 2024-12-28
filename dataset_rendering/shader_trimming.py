@@ -470,7 +470,7 @@ def optimizeGroup(node):
     treeStack.pop()
     grp_node_stack.pop()
 
-    ungroup_group(node)
+    # ungroup_group(node)
 
     return returnVal
 
@@ -717,7 +717,7 @@ optimizeable = {
     "GROUP": optimizeGroup,
     "GROUP_OUTPUT": optimizeGrpOut,
     "COMBINE_COLOR": optimizeCombColor,
-    # "MAP_RANGE": optimizeMapRange,
+    "MAP_RANGE": optimizeMapRange,
     "COMBXYZ": optimizeCombXYZ,
     "COMBRGB": optimizeCombColor,
     "GROUP_INPUT": void,
@@ -753,5 +753,6 @@ root = nodes["Material Output"]
 
 # ungroup_all_groups(currentTree())
 backTrack(root)
+ungroup_all_groups(currentTree())
 cleanUpCorpses(currentTree())
 arrange_node_tree(currentTree())
