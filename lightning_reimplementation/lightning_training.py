@@ -27,17 +27,25 @@ class MyModel(pl.LightningModule):
         self.num_classes = num_classes
 
         self.layers = nn.ModuleList([
-            nn.Linear(input_size, 2000),
-            nn.Linear(2000, 1500),
-            nn.Linear(1500, 1000),
+            nn.Linear(input_size, 2500),
+            nn.Linear(2500, 2000),
+            nn.Linear(2000, 1000),
+            nn.Linear(1000, 1000),
+            nn.Linear(1000, 1000),
             nn.Linear(1000, 1000),
             nn.Linear(1000, 1000),
             nn.Linear(1000, 1000),
             nn.Linear(1000, 1000),
             nn.Linear(1000, 500),
+            nn.Linear(500, 500),
+            nn.Linear(500, 500),
             nn.Linear(500, 100),
             nn.Linear(100, 100),
+            nn.Linear(100, 100),
+            nn.Linear(100, 100),
             nn.Linear(100, 50),
+            nn.Linear(50, 50),
+            nn.Linear(50, 50),
             nn.Linear(50, num_classes)
         ])
 

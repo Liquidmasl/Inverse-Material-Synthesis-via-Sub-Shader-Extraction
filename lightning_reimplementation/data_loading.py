@@ -11,6 +11,9 @@ from tqdm.auto import tqdm
 
 from lightning_reimplementation.util import get_file_with_highest_number
 
+from multiprocessing import Manager
+
+
 class BlenderSuperShaderRendersDataset(Dataset):
     def __init__(self, param_dir, gram_directory, training_run_path, transform=None, add_key_colors_to_input=False,
                   input_size=-1, force_additional_importance_calc=False, importance_path=None, index_path=None, prefiltered_gram_path=None, **kwargs):
@@ -25,7 +28,14 @@ class BlenderSuperShaderRendersDataset(Dataset):
         self.prefiltered_gram_path = os.path.join(prefiltered_gram_path, f"top_{input_size}")
         os.makedirs(self.prefiltered_gram_path, exist_ok=True)
 
-        self.cache = {}
+        manager = Manager()
+        self.cache = manager.dict()
+
+
+        # cache_path = os.path.join(prefiltered_gram_path, 'dataset_cache.yaml')
+        # if os.path.exists(cache_path):
+        #     with open(cache_path, 'r') as file:
+        #         self.cache = yaml.load(file, Loader=yaml.FullLoader)
 
         self.num_params = 41
 
@@ -155,6 +165,8 @@ class BlenderSuperShaderRendersDataset(Dataset):
         if index in self.cache:
             return self.cache[index]
 
+        print(f"cache miss Loading {index}")
+
         try:
             input_grams_concat = torch.load(os.path.join(self.prefiltered_gram_path, f"{index}.pt"))
             params = self.dataset.iloc[index]['parameters'].values.astype(np.float32)
@@ -184,6 +196,9 @@ class BlenderSuperShaderRendersDataset(Dataset):
         return (input_grams_concat, params)
 
 
+    # def save_cache(self, path):
+    #     with open(os.path.join(path, 'dataset_cache.yaml'), 'w') as file:
+    #         yaml.dump(self.cache, file)
 
 
 class BlenderShaderDataModule(LightningDataModule):
@@ -204,10 +219,11 @@ class BlenderShaderDataModule(LightningDataModule):
         self.dataset = BlenderSuperShaderRendersDataset(training_run_path=self.training_run_path, **self.configs)
 
         #   this is hacky and slow, but it forces to dataset to prefilter all the data:
-        if not self.cache_built:
-            for a, b in tqdm(self.dataset, desc="Prefiltering dataset"):
-                pass
-            self.cache_built = True
+        # if not self.cache_built:
+        #     for a, b in tqdm(self.dataset, desc="Prefiltering dataset"):
+        #         pass
+        #     self.cache_built = True
+            # self.dataset.save_cache(r'/app/data/grams/prefiltered_concat/')
 
         if 'splits_calc' in self.configs:
             self.splits = self.configs['splits_calc']
@@ -257,11 +273,11 @@ class BlenderShaderDataModule(LightningDataModule):
 
     def train_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['train_start'], self.configs['splits_calc']['train_end']))
-        return DataLoader(subs, batch_size=self.batch_size, shuffle=True, num_workers=16, pin_memory=True)
+        return DataLoader(subs, batch_size=self.batch_size, shuffle=True, num_workers=32, pin_memory=True, persistent_workers=True)
 
     def val_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['val_start'], self.configs['splits_calc']['val_end']))
-        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=16, pin_memory=True)
+        return DataLoader(subs, batch_size=self.batch_size, shuffle=False, num_workers=16, pin_memory=True, persistent_workers=True)
 
     def test_dataloader(self):
         subs = torch.utils.data.Subset(self.dataset, range(self.configs['splits_calc']['test_start'], self.configs['splits_calc']['test_end']))
