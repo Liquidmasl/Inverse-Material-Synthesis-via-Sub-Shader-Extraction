@@ -1,8 +1,7 @@
-import bpy
-import random
 import csv
+import random
 
-
+import bpy
 
 
 def quantize(value, n):

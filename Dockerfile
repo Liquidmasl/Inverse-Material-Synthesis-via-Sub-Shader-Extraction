@@ -12,6 +12,7 @@ RUN pip install \
 ADD . /app
 WORKDIR /app
 
+# thid does  not use uv 'yet' cause i dont quite understand the correct way to do it.
 RUN pip install -r requirements.txt
 
 CMD ["python", "loadvgg.py"]
